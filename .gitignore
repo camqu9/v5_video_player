@@ -1,0 +1,7 @@
+# PROS Build Artifacts
+pros_project/bin/
+pros_project/.d/
+pros_project/firmware/
+*.v5y
+*.mp4
+*.avi
