@@ -1,0 +1,22 @@
+{
+    "configurations": [
+        {
+            "name": "PROS VEX V5 (ARM)",
+            "includePath": [
+                "${workspaceFolder}/pros_project/include",
+                "${workspaceFolder}/include",
+                "${workspaceFolder}/**",
+                "/home/camqu9/.gemini/antigravity/scratch/arm-toolchain/arm-none-eabi/include/**",
+                "/home/camqu9/.gemini/antigravity/scratch/arm-toolchain/include/**"
+            ],
+            "defines": [
+                "_PROS_4_"
+            ],
+            "compilerPath": "/home/camqu9/.gemini/antigravity/scratch/arm-toolchain/bin/arm-none-eabi-g++",
+            "cStandard": "gnu11",
+            "cppStandard": "gnu++20",
+            "intelliSenseMode": "gcc-arm"
+        }
+    ],
+    "version": 4
+}
