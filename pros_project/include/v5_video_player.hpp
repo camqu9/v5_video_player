@@ -1,25 +1,19 @@
 #pragma once
 
-// VEX V5 Brain Video Player Library
-// Reads .v5y video files from MicroSD card and displays them on the V5 screen
-
 #include <cstdio>
 #include <cstdint>
 #include <cstring>
 #include "pros/rtos.hpp"
 
-// Low-level V5 display C API function to copy frame buffer directly to LCD
 extern "C" void vexDisplayCopyRect(int32_t x0, int32_t y0, int32_t x1, int32_t y1,
                                    const uint32_t* pBuffer, int32_t stride);
 
 namespace v5_video {
 
-// V5 Brain LCD resolution is 480x272 pixels
 const int DISPLAY_WIDTH  = 480;
 const int DISPLAY_HEIGHT = 272;
 const int MAX_FRAME_BYTES = DISPLAY_WIDTH * DISPLAY_HEIGHT * 3 / 2;
 
-// Decompresses LZ4 video blocks into raw YUV420 frame data
 static inline int decompress_lz4(const uint8_t* src, uint8_t* dst, int src_len, int dst_len) {
     const uint8_t* ip = src;
     const uint8_t* const ip_end = src + src_len;
@@ -69,7 +63,6 @@ static inline int decompress_lz4(const uint8_t* src, uint8_t* dst, int src_len, 
     return static_cast<int>(op - dst);
 }
 
-// Fast lookup tables for converting YUV color values to RGB
 static int32_t y_table[256];
 static int32_t cr_r[256], cr_g[256], cb_g[256], cb_b[256];
 static bool tables_initialized = false;
@@ -86,17 +79,14 @@ static void init_color_tables() {
     tables_initialized = true;
 }
 
-// Helper to keep RGB pixel values between 0 and 255
 static inline uint32_t clamp_color(int32_t value) {
     return static_cast<uint32_t>(value < 0 ? 0 : (value > 255 ? 255 : value));
 }
 
-// Memory buffers for frame decoding
 static uint8_t yuv_buffer[MAX_FRAME_BYTES];
 static uint8_t compressed_buffer[MAX_FRAME_BYTES];
 static uint32_t display_buffer[DISPLAY_HEIGHT][DISPLAY_WIDTH];
 
-// Decode 480x272 YUV frame directly into RGB screen buffer
 static inline void decode_native_frame(int width, int height) {
     uint32_t y_size  = static_cast<uint32_t>(width * height);
     uint32_t uv_size = (width >> 1) * (height >> 1);
@@ -124,11 +114,9 @@ static inline void decode_native_frame(int width, int height) {
     }
 }
 
-// Main video player function called by background RTOS task
 inline bool play_video(const char* filepath) {
     FILE* video_file = nullptr;
 
-    // Retry opening file in case SD card is still mounting
     for (int retry = 0; retry < 20 && !video_file; retry++) {
         video_file = fopen(filepath, "rb");
         if (!video_file) pros::delay(100);
@@ -139,7 +127,6 @@ inline bool play_video(const char* filepath) {
         return false;
     }
 
-    // Read 16-byte video file header
     uint8_t header[16];
     if (fread(header, 1, 16, video_file) < 16) {
         printf("Error: Invalid video header\n");
@@ -172,7 +159,6 @@ inline bool play_video(const char* filepath) {
             uint32_t comp_size = 0;
             if (fread(&comp_size, 1, 4, video_file) < 4 || comp_size > MAX_FRAME_BYTES ||
                 fread(compressed_buffer, 1, comp_size, video_file) < comp_size) {
-                // Loop video when reaching end of file
                 fseek(video_file, start_position, SEEK_SET);
                 continue;
             }
@@ -188,13 +174,10 @@ inline bool play_video(const char* filepath) {
             }
         }
 
-        // Decode frame into screen buffer
         decode_native_frame(width, height);
 
-        // Copy buffer directly to V5 screen
         vexDisplayCopyRect(0, 0, DISPLAY_WIDTH - 1, DISPLAY_HEIGHT - 1, &display_buffer[0][0], DISPLAY_WIDTH);
 
-        // Maintain frame rate timing
         uint32_t elapsed = pros::millis() - start_time;
         if (elapsed < frame_delay_ms) {
             pros::delay(frame_delay_ms - elapsed);
