@@ -1,20 +1,26 @@
 #pragma once
 
+// VEX V5 Brain Video Player Library
+// Reads .v5y video files from MicroSD card and displays them on the V5 screen
+
 #include <cstdio>
 #include <cstdint>
 #include <cstring>
 #include "pros/rtos.hpp"
 
+// Low-level V5 display C API function to copy frame buffer directly to LCD
 extern "C" void vexDisplayCopyRect(int32_t x0, int32_t y0, int32_t x1, int32_t y1,
                                    const uint32_t* pBuffer, int32_t stride);
 
 namespace v5_video {
 
-static constexpr int DISPLAY_W = 480;
-static constexpr int DISPLAY_H = 272;
-static constexpr int MAX_FRAME_BYTES = DISPLAY_W * DISPLAY_H * 3 / 2;
+// V5 Brain LCD resolution is 480x272 pixels
+const int DISPLAY_WIDTH  = 480;
+const int DISPLAY_HEIGHT = 272;
+const int MAX_FRAME_BYTES = DISPLAY_WIDTH * DISPLAY_HEIGHT * 3 / 2;
 
-static inline int lz4_decompress(const uint8_t* src, uint8_t* dst, int src_len, int dst_len) {
+// Decompresses LZ4 video blocks into raw YUV420 frame data
+static inline int decompress_lz4(const uint8_t* src, uint8_t* dst, int src_len, int dst_len) {
     const uint8_t* ip = src;
     const uint8_t* const ip_end = src + src_len;
     uint8_t* op = dst;
@@ -63,168 +69,139 @@ static inline int lz4_decompress(const uint8_t* src, uint8_t* dst, int src_len, 
     return static_cast<int>(op - dst);
 }
 
-static int32_t y_tab[256];
+// Fast lookup tables for converting YUV color values to RGB
+static int32_t y_table[256];
 static int32_t cr_r[256], cr_g[256], cb_g[256], cb_b[256];
-static bool lut_ready = false;
+static bool tables_initialized = false;
 
-static void init_lut() {
-    if (lut_ready) return;
+static void init_color_tables() {
+    if (tables_initialized) return;
     for (int i = 0; i < 256; i++) {
-        y_tab[i] = 298 * (i - 16) + 128;
-        cr_r[i]  =  459 * (i - 128);
-        cr_g[i]  = -136 * (i - 128);
-        cb_g[i]  =  -55 * (i - 128);
-        cb_b[i]  =  541 * (i - 128);
+        y_table[i] = 298 * (i - 16) + 128;
+        cr_r[i]    =  459 * (i - 128);
+        cr_g[i]    = -136 * (i - 128);
+        cb_g[i]    =  -55 * (i - 128);
+        cb_b[i]    =  541 * (i - 128);
     }
-    lut_ready = true;
+    tables_initialized = true;
 }
 
-static inline uint32_t clamp8(int32_t v) {
-    return static_cast<uint32_t>(v < 0 ? 0 : (v > 255 ? 255 : v));
+// Helper to keep RGB pixel values between 0 and 255
+static inline uint32_t clamp_color(int32_t value) {
+    return static_cast<uint32_t>(value < 0 ? 0 : (value > 255 ? 255 : value));
 }
 
-static uint8_t yuv_buf[MAX_FRAME_BYTES];
-static uint8_t comp_buf[MAX_FRAME_BYTES];
-static uint32_t frame_buf[DISPLAY_H][DISPLAY_W];
+// Memory buffers for frame decoding
+static uint8_t yuv_buffer[MAX_FRAME_BYTES];
+static uint8_t compressed_buffer[MAX_FRAME_BYTES];
+static uint32_t display_buffer[DISPLAY_HEIGHT][DISPLAY_WIDTH];
 
-static inline void decode_frame_1to1(int w, int h) {
-    uint32_t y_sz  = static_cast<uint32_t>(w * h);
-    uint32_t uv_sz = (w >> 1) * (h >> 1);
-    const uint8_t* y_ptr  = yuv_buf;
-    const uint8_t* cb_ptr = yuv_buf + y_sz;
-    const uint8_t* cr_ptr = cb_ptr + uv_sz;
+// Decode 480x272 YUV frame directly into RGB screen buffer
+static inline void decode_native_frame(int width, int height) {
+    uint32_t y_size  = static_cast<uint32_t>(width * height);
+    uint32_t uv_size = (width >> 1) * (height >> 1);
+    const uint8_t* y_plane  = yuv_buffer;
+    const uint8_t* cb_plane = yuv_buffer + y_size;
+    const uint8_t* cr_plane = cb_plane + uv_size;
 
-    for (int sy = 0; sy < h; sy++) {
-        int uv_row_off = (sy >> 1) * (w >> 1);
-        const uint8_t* yrow = &y_ptr[sy * w];
-        uint32_t* frow = frame_buf[sy];
+    for (int y = 0; y < height; y++) {
+        int uv_row = (y >> 1) * (width >> 1);
+        const uint8_t* y_row = &y_plane[y * width];
+        uint32_t* display_row = display_buffer[y];
 
-        for (int sx = 0; sx < w; sx++) {
-            int uv_i   = uv_row_off + (sx >> 1);
-            int32_t Y0 = y_tab[yrow[sx]];
-            int32_t cb = cb_ptr[uv_i];
-            int32_t cr = cr_ptr[uv_i];
+        for (int x = 0; x < width; x++) {
+            int uv_index = uv_row + (x >> 1);
+            int32_t Y  = y_table[y_row[x]];
+            int32_t cb = cb_plane[uv_index];
+            int32_t cr = cr_plane[uv_index];
 
-            uint32_t r = clamp8((Y0 + cr_r[cr]) >> 8);
-            uint32_t g = clamp8((Y0 + cr_g[cr] + cb_g[cb]) >> 8);
-            uint32_t b = clamp8((Y0 + cb_b[cb]) >> 8);
+            uint32_t r = clamp_color((Y + cr_r[cr]) >> 8);
+            uint32_t g = clamp_color((Y + cr_g[cr] + cb_g[cb]) >> 8);
+            uint32_t b = clamp_color((Y + cb_b[cb]) >> 8);
 
-            frow[sx] = (r << 16) | (g << 8) | b;
+            display_row[x] = (r << 16) | (g << 8) | b;
         }
     }
 }
 
-static inline void decode_frame_2x(int w, int h) {
-    uint32_t y_sz  = static_cast<uint32_t>(w * h);
-    uint32_t uv_sz = (w >> 1) * (h >> 1);
-    const uint8_t* y_ptr  = yuv_buf;
-    const uint8_t* cb_ptr = yuv_buf + y_sz;
-    const uint8_t* cr_ptr = cb_ptr + uv_sz;
-
-    for (int sy = 0; sy < h; sy++) {
-        int dy0 = sy << 1;
-        int dy1 = dy0 + 1;
-        int uv_row_off = (sy >> 1) * (w >> 1);
-        const uint8_t* yrow = &y_ptr[sy * w];
-
-        for (int sx = 0; sx < w; sx++) {
-            int uv_i   = uv_row_off + (sx >> 1);
-            int32_t Y0 = y_tab[yrow[sx]];
-            int32_t cb = cb_ptr[uv_i];
-            int32_t cr = cr_ptr[uv_i];
-
-            uint32_t r  = clamp8((Y0 + cr_r[cr]) >> 8);
-            uint32_t g  = clamp8((Y0 + cr_g[cr] + cb_g[cb]) >> 8);
-            uint32_t b  = clamp8((Y0 + cb_b[cb]) >> 8);
-            uint32_t px = (r << 16) | (g << 8) | b;
-
-            int dx0 = sx << 1;
-            int dx1 = dx0 + 1;
-
-            frame_buf[dy0][dx0] = px;
-            frame_buf[dy0][dx1] = px;
-            frame_buf[dy1][dx0] = px;
-            frame_buf[dy1][dx1] = px;
-        }
-    }
-}
-
+// Main video player function called by background RTOS task
 inline bool play_video(const char* filepath) {
-    FILE* file = nullptr;
+    FILE* video_file = nullptr;
 
-    for (int i = 0; i < 20 && !file; i++) {
-        file = fopen(filepath, "rb");
-        if (!file) pros::delay(100);
+    // Retry opening file in case SD card is still mounting
+    for (int retry = 0; retry < 20 && !video_file; retry++) {
+        video_file = fopen(filepath, "rb");
+        if (!video_file) pros::delay(100);
     }
 
-    if (!file) {
-        printf("Error: cannot open video file '%s'\n", filepath);
+    if (!video_file) {
+        printf("Error: Could not open video file '%s'\n", filepath);
         return false;
     }
 
-    uint8_t hdr[16];
-    if (fread(hdr, 1, 16, file) < 16) {
-        printf("Error: invalid video header\n");
-        fclose(file);
+    // Read 16-byte video file header
+    uint8_t header[16];
+    if (fread(header, 1, 16, video_file) < 16) {
+        printf("Error: Invalid video header\n");
+        fclose(video_file);
         return false;
     }
 
-    bool is_lz4 = (hdr[0] == 'V' && hdr[1] == '5' && (hdr[2] == 'L' || hdr[2] == 'Z') && (hdr[3] == 'Z' || hdr[3] == '6'));
-    bool is_raw = (hdr[0] == 'V' && hdr[1] == '5' && hdr[2] == 'Y' && hdr[3] == 'U');
+    bool is_lz4 = (header[0] == 'V' && header[1] == '5' && (header[2] == 'L' || header[2] == 'Z'));
+    bool is_raw = (header[0] == 'V' && header[1] == '5' && header[2] == 'Y' && header[3] == 'U');
 
     if (!is_lz4 && !is_raw) {
-        printf("Error: unsupported format magic\n");
-        fclose(file);
+        printf("Error: Unsupported video format magic\n");
+        fclose(video_file);
         return false;
     }
 
-    uint16_t src_w   = static_cast<uint16_t>(hdr[4] | (hdr[5] << 8));
-    uint16_t src_h   = static_cast<uint16_t>(hdr[6] | (hdr[7] << 8));
-    uint16_t fps     = static_cast<uint16_t>(hdr[8] | (hdr[9] << 8));
-    uint32_t frame_bytes = static_cast<uint32_t>(src_w * src_h * 3 / 2);
-    uint32_t delay_ms    = (fps > 0) ? (1000u / fps) : 16u;
+    uint16_t width  = static_cast<uint16_t>(header[4] | (header[5] << 8));
+    uint16_t height = static_cast<uint16_t>(header[6] | (header[7] << 8));
+    uint16_t fps    = static_cast<uint16_t>(header[8] | (header[9] << 8));
+    uint32_t frame_bytes = static_cast<uint32_t>(width * height * 3 / 2);
+    uint32_t frame_delay_ms = (fps > 0) ? (1000u / fps) : 16u;
 
-    init_lut();
-    long data_start = ftell(file);
-    bool is_native = (src_w == DISPLAY_W && src_h == DISPLAY_H);
+    init_color_tables();
+    long start_position = ftell(video_file);
 
     while (true) {
-        uint32_t t0 = pros::millis();
+        uint32_t start_time = pros::millis();
 
         if (is_lz4) {
             uint32_t comp_size = 0;
-            if (fread(&comp_size, 1, 4, file) < 4 || comp_size > MAX_FRAME_BYTES ||
-                fread(comp_buf, 1, comp_size, file) < comp_size) {
-                fseek(file, data_start, SEEK_SET);
+            if (fread(&comp_size, 1, 4, video_file) < 4 || comp_size > MAX_FRAME_BYTES ||
+                fread(compressed_buffer, 1, comp_size, video_file) < comp_size) {
+                // Loop video when reaching end of file
+                fseek(video_file, start_position, SEEK_SET);
                 continue;
             }
 
-            if (lz4_decompress(comp_buf, yuv_buf, comp_size, frame_bytes) != static_cast<int>(frame_bytes)) {
-                fseek(file, data_start, SEEK_SET);
+            if (decompress_lz4(compressed_buffer, yuv_buffer, comp_size, frame_bytes) != static_cast<int>(frame_bytes)) {
+                fseek(video_file, start_position, SEEK_SET);
                 continue;
             }
         } else {
-            if (fread(yuv_buf, 1, frame_bytes, file) < frame_bytes) {
-                fseek(file, data_start, SEEK_SET);
+            if (fread(yuv_buffer, 1, frame_bytes, video_file) < frame_bytes) {
+                fseek(video_file, start_position, SEEK_SET);
                 continue;
             }
         }
 
-        if (is_native) {
-            decode_frame_1to1(src_w, src_h);
-        } else {
-            decode_frame_2x(src_w, src_h);
-        }
+        // Decode frame into screen buffer
+        decode_native_frame(width, height);
 
-        vexDisplayCopyRect(0, 0, DISPLAY_W - 1, DISPLAY_H - 1, &frame_buf[0][0], DISPLAY_W);
+        // Copy buffer directly to V5 screen
+        vexDisplayCopyRect(0, 0, DISPLAY_WIDTH - 1, DISPLAY_HEIGHT - 1, &display_buffer[0][0], DISPLAY_WIDTH);
 
-        uint32_t elapsed = pros::millis() - t0;
-        if (elapsed < delay_ms) {
-            pros::delay(delay_ms - elapsed);
+        // Maintain frame rate timing
+        uint32_t elapsed = pros::millis() - start_time;
+        if (elapsed < frame_delay_ms) {
+            pros::delay(frame_delay_ms - elapsed);
         }
     }
 
-    fclose(file);
+    fclose(video_file);
     return true;
 }
 
