@@ -1,9 +1,7 @@
 #pragma once
-
 #include "pros/screen.hpp"
 #include "pros/rtos.hpp"
 #include "liblvgl/libs/lz4/lz4.h"
-
 #include <cstdio>
 #include <cstdint>
 #include <cstring>
@@ -11,182 +9,72 @@
 #include <vector>
 #include <algorithm>
 #include <atomic>
-
-// V5R format: raw interleaved RGB24 frames (no chroma subsampling, no
-// color-matrix math). Optionally LZ4-compressed per frame.
 class V5P {
 public:
-    // Request the currently-playing video() (running on another task) to
-    // stop. Takes effect within about one frame period, then blanks the
-    // screen to its default (eraser) color.
-    void stop() {
-        stop_requested_.store(true, std::memory_order_relaxed);
-    }
-
-    bool video(const char* filepath) {
-        stop_requested_.store(false, std::memory_order_relaxed);
-
-        FILE* fp = std::fopen(filepath, "rb");
-        if (fp == nullptr) {
-            std::printf("V5P: could not open '%s'\n", filepath);
-            return false;
-        }
-
-        uint8_t head[HEADER_SIZE];
-        if (std::fread(head, 1, HEADER_SIZE, fp) != HEADER_SIZE) {
-            std::printf("V5P: '%s' is too short to hold a header\n", filepath);
-            std::fclose(fp);
-            return false;
-        }
-
-        bool compressed;
-        if (std::memcmp(head, "V5RZ", 4) == 0) {
-            compressed = true;
-        } else if (std::memcmp(head, "V5RU", 4) == 0) {
-            compressed = false;
-        } else {
-            std::printf("V5P: '%s' has an unrecognised magic\n", filepath);
-            std::fclose(fp);
-            return false;
-        }
-
-        uint16_t hw = 0, hh = 0, hfps = 0;
-        std::memcpy(&hw, head + 4, sizeof(hw));
-        std::memcpy(&hh, head + 6, sizeof(hh));
-        std::memcpy(&hfps, head + 8, sizeof(hfps));
-
-        const int w = static_cast<int>(hw);
-        const int h = static_cast<int>(hh);
-        const uint32_t fps = hfps ? static_cast<uint32_t>(hfps) : 30u;
-
-        if (w <= 0 || h <= 0 || w > MAX_DIM || h > MAX_DIM) {
-            std::printf("V5P: unusable frame size %dx%d\n", w, h);
-            std::fclose(fp);
-            return false;
-        }
-
-        const std::size_t pixel_count = static_cast<std::size_t>(w) * h;
-        const std::size_t frame_size = pixel_count * 3; // R,G,B interleaved
-        const std::size_t max_compressed =
-            static_cast<std::size_t>(LZ4_compressBound(static_cast<int>(frame_size)));
-
-        std::vector<uint8_t> rgb24(frame_size);
-        std::vector<uint8_t> comp;
-        std::vector<uint32_t> rgb(pixel_count);
-        if (compressed) {
-            comp.reserve(max_compressed);
-        }
-
-        const int draw_w = std::min(w, SCREEN_W);
-        const int draw_h = std::min(h, SCREEN_H);
-        const int dst_x = SCREEN_LEFT + (SCREEN_W - draw_w) / 2;
-        const int dst_y = SCREEN_TOP + (SCREEN_H - draw_h) / 2;
-        const int src_x = (w - draw_w) / 2;
-        const int src_y = (h - draw_h) / 2;
-        uint32_t* const src = rgb.data() + static_cast<std::size_t>(src_y) * w + src_x;
-
-        uint32_t next_frame = pros::millis();
-        uint32_t period_acc = 0;
-        bool ok = true;
-
-        bool stopped = false;
-
+    void stop() { st_.store(true, std::memory_order_relaxed); }
+    bool video(const char* fp) {
+        st_.store(false, std::memory_order_relaxed);
+        FILE* f = std::fopen(fp, "rb");
+        if (!f) { std::printf("V5P: could not open '%s'\n", fp); return false; }
+        uint8_t H[16];
+        if (std::fread(H, 1, 16, f) != 16) { std::printf("V5P: '%s' too short\n", fp); std::fclose(f); return false; }
+        bool Z; int CF;
+        if (!std::memcmp(H, "V5RU", 4)) { Z = false; CF = 0; }
+        else if (!std::memcmp(H, "V5RZ", 4)) { Z = true; CF = 0; }
+        else if (!std::memcmp(H, "V5YU", 4)) { Z = false; CF = 1; }
+        else if (!std::memcmp(H, "V5YZ", 4)) { Z = true; CF = 1; }
+        else { std::printf("V5P: bad magic in '%s'\n", fp); std::fclose(f); return false; }
+        uint16_t a=0,b=0,c=0;
+        std::memcpy(&a,H+4,2); std::memcpy(&b,H+6,2); std::memcpy(&c,H+8,2);
+        const int w=a, h=b; const uint32_t fr = c?c:30u;
+        if (w<=0||h<=0||w>1024||h>1024) { std::printf("V5P: bad size %dx%d\n",w,h); std::fclose(f); return false; }
+        if (CF==1 && ((w&1)||(h&1))) { std::printf("V5P: YUV420 needs even dims, got %dx%d\n",w,h); std::fclose(f); return false; }
+        const std::size_t pc=(std::size_t)w*h, cw=(std::size_t)w/2, ch=(std::size_t)h/2;
+        const std::size_t fs = CF==0 ? pc*3 : pc+cw*ch*2;
+        const std::size_t mc = (std::size_t)LZ4_compressBound((int)fs);
+        std::vector<uint8_t> buf(fs), cz; std::vector<uint32_t> px(pc);
+        if (Z) cz.reserve(mc);
+        const uint8_t *yp=buf.data(), *up=yp+pc, *vp=up+cw*ch;
+        const int dw=std::min(w,480), dh=std::min(h,272);
+        const int dx=(480-dw)/2, dy=(272-dh)/2, sx=(w-dw)/2, sy=(h-dh)/2;
+        uint32_t* const s = px.data() + (std::size_t)sy*w + sx;
+        uint32_t nf = pros::millis(), pa = 0; bool ok=true, stp=false;
         for (;;) {
-            if (stop_requested_.load(std::memory_order_relaxed)) {
-                stopped = true;
-                break;
-            }
-
-            if (compressed) {
-                uint32_t packed_size = 0;
-                if (std::fread(&packed_size, sizeof(packed_size), 1, fp) != 1) {
-                    break;
-                }
-                if (packed_size == 0 || packed_size > max_compressed) {
-                    std::printf("V5P: implausible compressed size %lu\n",
-                                static_cast<unsigned long>(packed_size));
-                    ok = false;
-                    break;
-                }
-
-                comp.resize(packed_size);
-                if (std::fread(comp.data(), 1, packed_size, fp) != packed_size) {
-                    std::printf("V5P: truncated frame\n");
-                    ok = false;
-                    break;
-                }
-
-                const int decoded = LZ4_decompress_safe(
-                    reinterpret_cast<const char*>(comp.data()),
-                    reinterpret_cast<char*>(rgb24.data()),
-                    static_cast<int>(packed_size),
-                    static_cast<int>(frame_size));
-
-                if (decoded < 0 || static_cast<std::size_t>(decoded) != frame_size) {
-                    std::printf("V5P: LZ4 decompress failed (ret=%d, expected %lu)\n",
-                                decoded, static_cast<unsigned long>(frame_size));
-                    ok = false;
-                    break;
-                }
-            } else {
-                if (std::fread(rgb24.data(), 1, frame_size, fp) != frame_size) {
-                    break;
-                }
-            }
-
-            rgb24_to_packed(rgb24.data(), pixel_count, rgb.data());
-
-            pros::screen::copy_area(static_cast<int16_t>(dst_x),
-                                    static_cast<int16_t>(dst_y),
-                                    static_cast<int16_t>(dst_x + draw_w - 1),
-                                    static_cast<int16_t>(dst_y + draw_h - 1),
-                                    src,
-                                    static_cast<int32_t>(w));
-
-            period_acc += 1000;
-            const uint32_t period = period_acc / fps;
-            period_acc %= fps;
-
-            next_frame += period;
-            const int32_t wait = static_cast<int32_t>(next_frame - pros::millis());
-            if (wait > 0) {
-                pros::delay(static_cast<uint32_t>(wait));
-            } else {
-                next_frame = pros::millis();
-                pros::delay(1);
-            }
+            if (st_.load(std::memory_order_relaxed)) { stp=true; break; }
+            if (Z) {
+                uint32_t ps=0;
+                if (std::fread(&ps,4,1,f)!=1) break;
+                if (!ps||ps>mc) { std::printf("V5P: bad compressed size %lu\n",(unsigned long)ps); ok=false; break; }
+                cz.resize(ps);
+                if (std::fread(cz.data(),1,ps,f)!=ps) { std::printf("V5P: truncated frame\n"); ok=false; break; }
+                int dc = LZ4_decompress_safe((const char*)cz.data(),(char*)buf.data(),(int)ps,(int)fs);
+                if (dc<0 || (std::size_t)dc!=fs) { std::printf("V5P: LZ4 fail (%d)\n",dc); ok=false; break; }
+            } else if (std::fread(buf.data(),1,fs,f)!=fs) break;
+            if (CF==0) r2p(buf.data(),pc,px.data()); else y2p(yp,up,vp,w,h,px.data());
+            pros::screen::copy_area((int16_t)dx,(int16_t)dy,(int16_t)(dx+dw-1),(int16_t)(dy+dh-1),s,(int32_t)w);
+            pa+=1000; const uint32_t pd=pa/fr; pa%=fr; nf+=pd;
+            const int32_t wt=(int32_t)(nf-pros::millis());
+            if (wt>0) pros::delay((uint32_t)wt); else { nf=pros::millis(); pros::delay(1); }
         }
-
-        std::fclose(fp);
-
-        if (stopped) {
-            pros::screen::erase();
-        }
-
+        std::fclose(f);
+        if (stp) pros::screen::erase();
         return ok;
     }
-
 private:
-    static constexpr int HEADER_SIZE = 16;
-    static constexpr int MAX_DIM = 1024;
-
-    static constexpr int SCREEN_LEFT = 0;
-    static constexpr int SCREEN_TOP = 0;
-    static constexpr int SCREEN_W = 480;
-    static constexpr int SCREEN_H = 272;
-
-    std::atomic<bool> stop_requested_{false};
-
-    // Straight byte-triplet -> packed 0x00RRGGBB, no math, no clamping needed
-    // since the bytes are already 0-255.
-    static void rgb24_to_packed(const uint8_t* rgb24, std::size_t pixel_count, uint32_t* out) {
-        const uint8_t* p = rgb24;
-        for (std::size_t i = 0; i < pixel_count; ++i) {
-            const uint32_t r = p[0];
-            const uint32_t g = p[1];
-            const uint32_t b = p[2];
-            out[i] = (r << 16) | (g << 8) | b;
-            p += 3;
+    std::atomic<bool> st_{false};
+    static inline uint8_t cl(int v) { return v<0?0:(v>255?255:(uint8_t)v); }
+    static void r2p(const uint8_t* p, std::size_t n, uint32_t* o) {
+        for (std::size_t i=0;i<n;++i,p+=3) o[i]=((uint32_t)p[0]<<16)|((uint32_t)p[1]<<8)|p[2];
+    }
+    static void y2p(const uint8_t* Y, const uint8_t* U, const uint8_t* V, int w, int h, uint32_t* o) {
+        const int cw=w/2;
+        for (int j=0;j<h;++j) {
+            const uint8_t *yr=Y+(std::size_t)j*w, *ur=U+(std::size_t)(j/2)*cw, *vr=V+(std::size_t)(j/2)*cw;
+            uint32_t* or_=o+(std::size_t)j*w;
+            for (int i=0;i<w;++i) {
+                const int C=(int)yr[i]-16, D=(int)ur[i/2]-128, E=(int)vr[i/2]-128;
+                or_[i] = ((uint32_t)cl((298*C+459*E+128)>>8)<<16) | ((uint32_t)cl((298*C-55*D-136*E+128)>>8)<<8) | (uint32_t)cl((298*C+541*D+128)>>8);
+            }
         }
     }
 };
