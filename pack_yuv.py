@@ -1,84 +1,126 @@
 #!/usr/bin/env python3
 """
-pack_yuv.py - Encodes video for VEX V5 (.v5y format with optional LZ4 compression).
+pack_yuv_lz4.py - LZ4-compressed Raw YUV420p Video Encoder for VEX V5 Brain
+Stores native YUV420p frames, each LZ4-block-compressed independently.
+BT.709 limited-range math is applied directly on raw Y/Cb/Cr bytes in the
+C++ decoder — this script does NOT touch color range/space.
+
+Requires: pip install lz4
+
+File format (.v5y):
+  Header (16 bytes):
+    [0-3]   Magic: 'V5YZ'
+    [4-5]   uint16_t src_width  (e.g. 480)
+    [6-7]   uint16_t src_height (e.g. 272)
+    [8-9]   uint16_t fps
+    [10-11] uint16_t reserved (0)
+    [12-15] uint32_t frame_count
+
+  Per frame:
+    [0-3]   uint32_t compressed_size
+    [4..]   compressed_size bytes of raw LZ4 block data
+            (decompresses to exactly src_width * src_height * 3/2 bytes,
+             laid out as Y plane, then Cb plane, then Cr plane)
 """
 import subprocess
 import struct
 import sys
 import os
+import time
 
-try:
-    import lz4.block
-    HAS_LZ4 = True
-except ImportError:
-    HAS_LZ4 = False
+import lz4.block
 
-DEFAULT_W   = 480
-DEFAULT_H   = 272
-DEFAULT_FPS = 60
+SRC_W   = 480
+SRC_H   = 272
+FPS     = 60
 
-def pack(input_file, output_file, src_w=DEFAULT_W, src_h=DEFAULT_H, fps=DEFAULT_FPS, use_lz4=True):
-    if use_lz4 and not HAS_LZ4:
-        print("Warning: python 'lz4' module not installed. Falling back to raw YUV.")
-        use_lz4 = False
+def pack(input_file, output_file):
+    print(f"[*] V5YZ Encoder (LZ4) — {input_file}")
+    print(f"[*] Target: {SRC_W}x{SRC_H} @ {FPS}fps")
 
-    magic = b'V5LZ' if use_lz4 else b'V5YU'
-    y_size     = src_w * src_h
-    uv_size    = (src_w // 2) * (src_h // 2)
-    frame_size = y_size + uv_size * 2
+    # Probe actual dimensions so we can report them
+    probe = subprocess.run([
+        "ffprobe", "-v", "error", "-select_streams", "v:0",
+        "-show_entries", "stream=width,height,r_frame_rate,color_range,color_space",
+        "-of", "csv=s=x:p=0", input_file
+    ], capture_output=True, text=True)
+    print(f"[*] Source info: {probe.stdout.strip()}")
 
+    # FFmpeg: decode -> scale to SRC_W x SRC_H -> output raw YUV420p
+    # NOTE: We do NOT convert from limited range here.
+    # The C++ decoder applies BT.709 limited-range math directly on raw Y/Cb/Cr bytes.
     ffmpeg_cmd = [
         "ffmpeg", "-y", "-i", input_file,
         "-vf", (
-            f"scale={src_w}:{src_h}:force_original_aspect_ratio=decrease,"
-            f"pad={src_w}:{src_h}:(ow-iw)/2:(oh-ih)/2:black,"
-            f"fps={fps}"
+            f"scale={SRC_W}:{SRC_H}:force_original_aspect_ratio=decrease,"
+            f"pad={SRC_W}:{SRC_H}:(ow-iw)/2:(oh-ih)/2:black,"
+            f"fps={FPS}"
         ),
         "-pix_fmt", "yuv420p",
         "-f", "rawvideo", "pipe:1"
     ]
 
-    print(f"Encoding '{input_file}' -> '{output_file}' ({src_w}x{src_h} @ {fps}fps)...")
+    y_size  = SRC_W * SRC_H
+    uv_size = (SRC_W // 2) * (SRC_H // 2)
+    frame_size = y_size + uv_size * 2
+
+    print(f"[*] Raw frame size: {frame_size} bytes "
+          f"({frame_size * FPS / 1024 / 1024:.2f} MB/s uncompressed at {FPS}fps)")
+    print(f"[*] Decoding, compressing, and writing frames...")
+
+    t0 = time.time()
+    frame_count = 0
+    raw_total = 0
+    comp_total = 0
+
     proc = subprocess.Popen(ffmpeg_cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
 
-    frame_count = 0
     with open(output_file, 'wb') as f:
-        flags = 1 if use_lz4 else 0
-        f.write(magic)
-        f.write(struct.pack('<HHHIH', src_w, src_h, fps, 0, flags))
+        # Write placeholder header (frame_count patched at the end)
+        f.write(b'V5YZ')
+        f.write(struct.pack('<HHHHI', SRC_W, SRC_H, FPS, 0, 0))  # 16 bytes total
 
         while True:
             raw = proc.stdout.read(frame_size)
             if len(raw) < frame_size:
                 break
 
-            if use_lz4:
-                comp = lz4.block.compress(raw, store_size=False)
-                f.write(struct.pack('<I', len(comp)))
-                f.write(comp)
-            else:
-                f.write(raw)
+            # store_size=False: pure LZ4 block, no embedded size header —
+            # the C++ decoder already knows the decompressed size from w*h.
+            compressed = lz4.block.compress(raw, mode='default', store_size=False)
 
+            f.write(struct.pack('<I', len(compressed)))
+            f.write(compressed)
+
+            raw_total += frame_size
+            comp_total += len(compressed)
             frame_count += 1
-            if frame_count % 300 == 0:
-                print(f"  Encoded {frame_count} frames...")
+            if frame_count % 100 == 0:
+                elapsed = time.time() - t0
+                fps_cur = frame_count / elapsed
+                ratio = raw_total / comp_total if comp_total else 0
+                print(f"  [>] {frame_count} frames encoded ({fps_cur:.1f} fps, "
+                      f"{ratio:.2f}x compression so far)")
 
-        f.seek(10)
+        # Patch frame_count in header
+        f.seek(12)
         f.write(struct.pack('<I', frame_count))
 
     proc.wait()
-    print(f"Done! Encoded {frame_count} frames to {output_file}.")
+    elapsed = time.time() - t0
+    fsize = os.path.getsize(output_file)
+    ratio = raw_total / comp_total if comp_total else 0
+    avg_frame_bytes = comp_total / frame_count if frame_count else 0
+
+    print(f"[+] Done! {frame_count} frames in {elapsed:.1f}s")
+    print(f"[+] Output: {output_file}  ({fsize / 1024 / 1024:.2f} MB)")
+    print(f"[+] Compression ratio: {ratio:.2f}x  (raw {raw_total/1024/1024:.2f} MB -> "
+          f"compressed {comp_total/1024/1024:.2f} MB)")
+    print(f"[+] Avg compressed frame size: {avg_frame_bytes/1024:.1f} KB")
+    print(f"[+] SD read bandwidth needed: {avg_frame_bytes * FPS / 1024 / 1024:.2f} MB/s @ {FPS}fps")
 
 if __name__ == "__main__":
     if len(sys.argv) < 3:
-        print(f"Usage: {sys.argv[0]} <input_video> <output.v5y> [width] [height] [fps] [--raw]")
+        print(f"Usage: {sys.argv[0]} <input_video> <output.v5y>")
         sys.exit(1)
-
-    input_path  = sys.argv[1]
-    output_path = sys.argv[2]
-    w   = int(sys.argv[3]) if len(sys.argv) > 3 and sys.argv[3] != "--raw" else DEFAULT_W
-    h   = int(sys.argv[4]) if len(sys.argv) > 4 and sys.argv[4] != "--raw" else DEFAULT_H
-    fps = int(sys.argv[5]) if len(sys.argv) > 5 and sys.argv[5] != "--raw" else DEFAULT_FPS
-    use_lz4 = "--raw" not in sys.argv
-
-    pack(input_path, output_path, w, h, fps, use_lz4=use_lz4)
+    pack(sys.argv[1], sys.argv[2])

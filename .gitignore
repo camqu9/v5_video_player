@@ -1,7 +1,22 @@
-# PROS Build Artifacts
-pros_project/bin/
-pros_project/.d/
-pros_project/firmware/
+# Video files and large binaries
+*.v5p
 *.v5y
+*.v5b
+*.raw
 *.mp4
-*.avi
+*.mkv
+*.webm
+*.zip
+
+# PROS and build artifacts
+bin/
+.vscode/
+.cache/
+.d/
+*.o
+*.obj
+*.bin
+*.elf
+compile_commands.json
+temp.log
+temp.errors

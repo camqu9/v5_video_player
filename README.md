@@ -1,14 +1,13 @@
-# VEX V5 Video Tools
+# V5 Video Player (LZ4 Streaming Player for VEX V5)
 
-Utilities to convert video files to `.v5y` format for playback on the VEX V5 Brain LCD (480x272 @ 60 FPS).
+High-performance video playback on the VEX V5 Robot Brain screen (480x272 @ up to 60 FPS) with direct hardware blitting (`pros::screen::copy_area`) and ultra-fast LZ4 streaming decompression from MicroSD (`/usd/`).
 
-## Files
-- `pack_yuv.py`: Python video encoder (FFmpeg + LZ4 block compression)
-- `make_video.sh`: Shell helper script to convert videos to MicroSD card root (`/usd/video.v5y`)
-- `flash.sh`: Build & upload script for PROS CLI
+## Features
+- **30–60 FPS Smooth Playback**: Minimal CPU overhead with LZ4 block decompression.
+- **Direct Hardware Blitting**: Bypasses GUI object overhead using `pros::screen::copy_area()`.
+- **Streaming Architecture**: Reads frame-by-frame on-demand from the SD card without consuming the Brain's RAM.
+- **Background Task Support**: Non-blocking playback within a PROS background task (`pros::Task`) with asynchronous stop support.
 
-## Usage
-Convert any video file to `.v5y` and write to SD card:
-```bash
-./make_video.sh input.mp4
-```
+## Structure
+- `pack_yuv.py` / `v5p_player.py`: Python video encoder & desktop reference player.
+- `lz4 to rgb disp + main logic/`: PROS C++ project with `include/v5p.hpp` and robot integration in `src/main.cpp`.
