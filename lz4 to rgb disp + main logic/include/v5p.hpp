@@ -12,23 +12,72 @@
 class V5P {
 public:
     void stop() { st_.store(true, std::memory_order_relaxed); }
-    bool video(const char* fp) {
+    bool video(const char* fp, bool loop = true) {
         st_.store(false, std::memory_order_relaxed);
-        FILE* f = std::fopen(fp, "rb");
-        if (!f) { std::printf("V5P: could not open '%s'\n", fp); return false; }
+
+        // Wait for SD card to be ready
+        uint32_t wait_start = pros::millis();
+        while (!pros::usd::is_installed()) {
+            pros::screen::set_pen(pros::Color::yellow);
+            pros::screen::print(pros::E_TEXT_MEDIUM, 1, "V5P: Waiting for SD card...");
+            pros::delay(200);
+            if (pros::millis() - wait_start > 10000) {
+                pros::screen::set_pen(pros::Color::red);
+                pros::screen::print(pros::E_TEXT_MEDIUM, 1, "V5P: SD card not detected!");
+                return false;
+            }
+        }
+
+        FILE* f = nullptr;
+        for (int retries = 0; retries < 20; ++retries) {
+            f = std::fopen(fp, "rb");
+            if (f) break;
+            pros::delay(100);
+        }
+        if (!f) {
+            pros::screen::set_pen(pros::Color::red);
+            pros::screen::print(pros::E_TEXT_MEDIUM, 1, "V5P: Cannot open %s", fp);
+            std::printf("V5P: could not open '%s'\n", fp);
+            return false;
+        }
+
         uint8_t H[16];
-        if (std::fread(H, 1, 16, f) != 16) { std::printf("V5P: '%s' too short\n", fp); std::fclose(f); return false; }
+        if (std::fread(H, 1, 16, f) != 16) {
+            pros::screen::set_pen(pros::Color::red);
+            pros::screen::print(pros::E_TEXT_MEDIUM, 1, "V5P: '%s' too short", fp);
+            std::printf("V5P: '%s' too short\n", fp);
+            std::fclose(f);
+            return false;
+        }
         bool Z; int CF;
         if (!std::memcmp(H, "V5RU", 4)) { Z = false; CF = 0; }
         else if (!std::memcmp(H, "V5RZ", 4)) { Z = true; CF = 0; }
         else if (!std::memcmp(H, "V5YU", 4)) { Z = false; CF = 1; }
         else if (!std::memcmp(H, "V5YZ", 4)) { Z = true; CF = 1; }
-        else { std::printf("V5P: bad magic in '%s'\n", fp); std::fclose(f); return false; }
+        else {
+            pros::screen::set_pen(pros::Color::red);
+            pros::screen::print(pros::E_TEXT_MEDIUM, 1, "V5P: bad magic in '%s'", fp);
+            std::printf("V5P: bad magic in '%s'\n", fp);
+            std::fclose(f);
+            return false;
+        }
         uint16_t a=0,b=0,c=0;
         std::memcpy(&a,H+4,2); std::memcpy(&b,H+6,2); std::memcpy(&c,H+8,2);
         const int w=a, h=b; const uint32_t fr = c?c:30u;
-        if (w<=0||h<=0||w>1024||h>1024) { std::printf("V5P: bad size %dx%d\n",w,h); std::fclose(f); return false; }
-        if (CF==1 && ((w&1)||(h&1))) { std::printf("V5P: YUV420 needs even dims, got %dx%d\n",w,h); std::fclose(f); return false; }
+        if (w<=0||h<=0||w>1024||h>1024) {
+            pros::screen::set_pen(pros::Color::red);
+            pros::screen::print(pros::E_TEXT_MEDIUM, 1, "V5P: bad size %dx%d", w, h);
+            std::printf("V5P: bad size %dx%d\n",w,h);
+            std::fclose(f);
+            return false;
+        }
+        if (CF==1 && ((w&1)||(h&1))) {
+            pros::screen::set_pen(pros::Color::red);
+            pros::screen::print(pros::E_TEXT_MEDIUM, 1, "V5P: YUV420 needs even dims");
+            std::printf("V5P: YUV420 needs even dims, got %dx%d\n",w,h);
+            std::fclose(f);
+            return false;
+        }
         const std::size_t pc=(std::size_t)w*h, cw=(std::size_t)w/2, ch=(std::size_t)h/2;
         const std::size_t fs = CF==0 ? pc*3 : pc+cw*ch*2;
         const std::size_t mc = (std::size_t)LZ4_compressBound((int)fs);
@@ -43,13 +92,27 @@ public:
             if (st_.load(std::memory_order_relaxed)) { stp=true; break; }
             if (Z) {
                 uint32_t ps=0;
-                if (std::fread(&ps,4,1,f)!=1) break;
+                if (std::fread(&ps,4,1,f)!=1) {
+                    if (loop) {
+                        std::fseek(f, 16, SEEK_SET);
+                        continue;
+                    }
+                    break;
+                }
                 if (!ps||ps>mc) { std::printf("V5P: bad compressed size %lu\n",(unsigned long)ps); ok=false; break; }
                 cz.resize(ps);
                 if (std::fread(cz.data(),1,ps,f)!=ps) { std::printf("V5P: truncated frame\n"); ok=false; break; }
                 int dc = LZ4_decompress_safe((const char*)cz.data(),(char*)buf.data(),(int)ps,(int)fs);
                 if (dc<0 || (std::size_t)dc!=fs) { std::printf("V5P: LZ4 fail (%d)\n",dc); ok=false; break; }
-            } else if (std::fread(buf.data(),1,fs,f)!=fs) break;
+            } else {
+                if (std::fread(buf.data(),1,fs,f)!=fs) {
+                    if (loop) {
+                        std::fseek(f, 16, SEEK_SET);
+                        continue;
+                    }
+                    break;
+                }
+            }
             if (CF==0) r2p(buf.data(),pc,px.data()); else y2p(yp,up,vp,w,h,px.data());
             pros::screen::copy_area((int16_t)dx,(int16_t)dy,(int16_t)(dx+dw-1),(int16_t)(dy+dh-1),s,(int32_t)w);
             pa+=1000; const uint32_t pd=pa/fr; pa%=fr; nf+=pd;

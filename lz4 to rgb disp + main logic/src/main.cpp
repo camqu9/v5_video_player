@@ -10,7 +10,7 @@
 #include <algorithm>
 V5P furry;
 pros::Controller master (pros::E_CONTROLLER_MASTER);
-pros::MotorGroup furry_1 ({1,2});
+pros::MotorGroup furry_1 ({11,12});
 pros::MotorGroup furry_2 ({9,10});
 pros::AIVision catgirl_datecter(5);
 /**
@@ -30,7 +30,7 @@ void on_center_button() {
  */
 void initialize() {
 pros::Task funnythingvideo([]{
-  furry.video("/usd/catdog.v5p");
+  furry.video("/usd/girls_like_us.v5p");
 });
 }
 void disabled() {}
@@ -96,8 +96,8 @@ break;
 void opcontrol() {
 	catgirl_datecter.reset();
 	 while (true) {
-    int girlcat = master.get_analog(pros::E_CONTROLLER_ANALOG_RIGHT_Y);
-    int spiner_cat = master.get_analog(pros::E_CONTROLLER_ANALOG_RIGHT_X);
+    int girlcat = master.get_analog(pros::E_CONTROLLER_ANALOG_RIGHT_X);
+    int spiner_cat = master.get_analog(pros::E_CONTROLLER_ANALOG_RIGHT_Y);
 	 furry_1.move(girlcat + spiner_cat);
 	 furry_2.move(girlcat - spiner_cat); // mrreoawwww :pleading: mrroewawww mrroewawwddd girlcat REIDING THIS IM A CATGIRL mrreowww 
       pros::delay(20);

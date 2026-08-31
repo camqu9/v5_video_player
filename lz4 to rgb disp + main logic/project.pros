@@ -1,7 +1,7 @@
 {
   "py/object": "pros.conductor.project.Project",
   "py/state": {
-    "project_name": "lz4 to rgb disp + main logic",
+    "project_name": "v5p to rgb disp + main logic",
     "target": "v5",
     "templates": {
       "kernel": {
@@ -594,7 +594,8 @@
     "upload_options": {
       "icon": "robot",
       "description": "paws.nya.je",
-      "after": "none"
+      "after": "none",
+      "slot": 2
     },
     "use_early_access": false
   }
