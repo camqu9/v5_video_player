@@ -2,6 +2,10 @@
 
 High-performance video playback on the VEX V5 Robot Brain screen (480x272 @ up to 60 FPS) with direct hardware blitting (`pros::screen::copy_area`) and ultra-fast LZ4 streaming decompression from MicroSD (`/usd/`).
 
+## Proof of Concept
+
+![Proof of Concept](demo.webp)
+
 ## Features
 - **30–60 FPS Smooth Playback**: Minimal CPU overhead with LZ4 block decompression.
 - **Direct Hardware Blitting**: Bypasses GUI object overhead using `pros::screen::copy_area()`.
