@@ -32,7 +32,12 @@ try:
 except ImportError:
     cv2 = None
 
-MAGIC = b"V5YZ"
+SUPPORTED_MAGICS = {
+    b"V5YZ": {"format": "yuv", "compressed": True, "desc": "YUV420 + LZ4"},
+    b"V5YU": {"format": "yuv", "compressed": False, "desc": "YUV420 Raw"},
+    b"V5RZ": {"format": "rgb", "compressed": True, "desc": "RGB24 + LZ4"},
+    b"V5RU": {"format": "rgb", "compressed": False, "desc": "RGB24 Raw"},
+}
 HEADER_STRUCT = "<4sHHHHI"  # magic, width, height, fps, reserved, frame_count
 HEADER_SIZE = struct.calcsize(HEADER_STRUCT)
 
@@ -42,9 +47,15 @@ def read_header(f):
     if len(raw) != HEADER_SIZE:
         raise ValueError("file too short to contain a header")
     magic, width, height, fps, reserved, frame_count = struct.unpack(HEADER_STRUCT, raw)
-    if magic != MAGIC:
-        raise ValueError(f"bad magic {magic!r}, expected {MAGIC!r}")
+    if magic not in SUPPORTED_MAGICS:
+        valid = ", ".join(m.decode() for m in SUPPORTED_MAGICS.keys())
+        raise ValueError(f"bad magic {magic!r}, expected one of [{valid}]")
+    info = SUPPORTED_MAGICS[magic]
     return {
+        "magic": magic.decode("ascii", errors="replace"),
+        "format": info["format"],
+        "compressed": info["compressed"],
+        "desc": info["desc"],
         "width": width,
         "height": height,
         "fps": fps,
@@ -53,29 +64,38 @@ def read_header(f):
     }
 
 
-def read_frames(f, width, height):
-    """Yields decompressed I420 frames as raw bytes (Y, then Cb, then Cr)."""
-    y_size = width * height
-    c_size = y_size // 4
-    frame_size = y_size + 2 * c_size
+def read_frames(f, width, height, compressed=True, fmt="yuv"):
+    """Yields decompressed or raw frame bytes."""
+    if fmt == "rgb":
+        frame_size = width * height * 3
+    else:
+        y_size = width * height
+        c_size = (width // 2) * (height // 2)
+        frame_size = y_size + 2 * c_size
 
     while True:
-        size_raw = f.read(4)
-        if len(size_raw) < 4:
-            return  # clean EOF
-        (compressed_size,) = struct.unpack("<I", size_raw)
-        if compressed_size == 0 or compressed_size > (1 << 28):
-            raise ValueError(f"implausible compressed frame size: {compressed_size}")
+        if compressed:
+            size_raw = f.read(4)
+            if len(size_raw) < 4:
+                return  # clean EOF
+            (compressed_size,) = struct.unpack("<I", size_raw)
+            if compressed_size == 0 or compressed_size > (1 << 28):
+                raise ValueError(f"implausible compressed frame size: {compressed_size}")
 
-        comp = f.read(compressed_size)
-        if len(comp) != compressed_size:
-            raise ValueError("unexpected EOF reading frame data")
+            comp = f.read(compressed_size)
+            if len(comp) != compressed_size:
+                raise ValueError("unexpected EOF reading frame data")
 
-        raw = lz4.block.decompress(comp, uncompressed_size=frame_size)
-        if len(raw) != frame_size:
-            raise ValueError(f"decompressed size mismatch: got {len(raw)}, expected {frame_size}")
+            raw = lz4.block.decompress(comp, uncompressed_size=frame_size)
+            if len(raw) != frame_size:
+                raise ValueError(f"decompressed size mismatch: got {len(raw)}, expected {frame_size}")
 
-        yield raw
+            yield raw
+        else:
+            raw = f.read(frame_size)
+            if len(raw) < frame_size:
+                return  # clean EOF
+            yield raw
 
 
 def i420_to_rgb_bt709(raw, width, height):
@@ -124,18 +144,24 @@ def main():
 
     with open(args.input, "rb") as f:
         hdr = read_header(f)
-        print(f"[*] {args.input}: {hdr['width']}x{hdr['height']} @ {hdr['fps']}fps, "
+        print(f"[*] {args.input}: [{hdr['magic']} - {hdr['desc']}] {hdr['width']}x{hdr['height']} @ {hdr['fps']}fps, "
               f"{hdr['frame_count']} frames (header count)")
 
         w, h = hdr["width"], hdr["height"]
+        fmt = hdr["format"]
+        compressed = hdr["compressed"]
         writer = None
         decoded_count = 0
 
-        for i, raw in enumerate(read_frames(f, w, h)):
+        for i, raw in enumerate(read_frames(f, w, h, compressed=compressed, fmt=fmt)):
             if args.frame is not None and i != args.frame:
                 continue
 
-            rgb = i420_to_rgb_bt709(raw, w, h)
+            if fmt == "yuv":
+                rgb = i420_to_rgb_bt709(raw, w, h)
+            else:
+                rgb = np.frombuffer(raw, dtype=np.uint8, count=w * h * 3).reshape((h, w, 3))
+
             bgr = cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR) if cv2 is not None else rgb[:, :, ::-1]
 
             if args.frame is not None:
@@ -145,13 +171,13 @@ def main():
                 else:
                     print("[*] pass --out to save this frame, or --play to view it")
                     if cv2 is not None:
-                        cv2.imshow("v5y frame", bgr)
+                        cv2.imshow("v5p frame", bgr)
                         cv2.waitKey(0)
                 break
 
             if args.play:
-                cv2.imshow("v5y playback", bgr)
-                delay_ms = max(1, int(1000 / hdr["fps"])) if hdr["fps"] else 33
+                cv2.imshow("v5p playback", bgr)
+                delay_ms = max(1, int(1000 / (hdr["fps"] or 30)))
                 if cv2.waitKey(delay_ms) & 0xFF == ord('q'):
                     break
 
