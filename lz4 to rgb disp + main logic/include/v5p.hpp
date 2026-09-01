@@ -11,6 +11,9 @@
 #include <atomic>
 extern "C" {
     void vexDisplayCopyRect(int32_t x1, int32_t y1, int32_t x2, int32_t y2, uint32_t *pSrc, int32_t srcStride);
+    void vexDisplayClipRegionSet(int32_t x1, int32_t y1, int32_t x2, int32_t y2);
+    void vexDisplayClipRegionSetWithIndex(int32_t index, int32_t x1, int32_t y1, int32_t x2, int32_t y2);
+    void vexDisplayRender(bool bVsyncWait, bool bRunScheduler);
 }
 
 class V5P {
@@ -96,6 +99,11 @@ public:
         if (dw != SW || dh != SH) {
             canvas.assign((std::size_t)SW * SH, 0);
         }
+
+        // Set clipping region to full unconstrained 480x272
+        vexDisplayClipRegionSet(0, 0, SW - 1, SH - 1);
+        vexDisplayClipRegionSetWithIndex(0, 0, 0, SW - 1, SH - 1);
+
         uint32_t nf = pros::millis(), pa = 0; bool ok=true, stp=false;
         for (;;) {
             if (st_.load(std::memory_order_relaxed)) { stp=true; break; }
@@ -124,16 +132,22 @@ public:
             }
             if (CF==0) r2p(buf.data(),pc,px.data()); else y2p(yp,up,vp,w,h,px.data());
 
+            // Ensure clip region remains full screen
+            vexDisplayClipRegionSet(0, 0, SW - 1, SH - 1);
+
             if (dw == SW && dh == SH) {
-                vexDisplayCopyRect(0, 0, SW, SH, px.data(), SW);
+                vexDisplayCopyRect(0, 0, SW - 1, SH - 1, px.data(), SW);
             } else {
                 for (int row = 0; row < dh; ++row) {
                     std::memcpy(canvas.data() + (std::size_t)(dy + row) * SW + dx,
                                 s + (std::size_t)row * w,
                                 (std::size_t)dw * sizeof(uint32_t));
                 }
-                vexDisplayCopyRect(0, 0, SW, SH, canvas.data(), SW);
+                vexDisplayCopyRect(0, 0, SW - 1, SH - 1, canvas.data(), SW);
             }
+
+            // Flush/render frame buffer to physical LCD
+            vexDisplayRender(false, false);
 
             pa+=1000; const uint32_t pd=pa/fr; pa%=fr; nf+=pd;
             const int32_t wt=(int32_t)(nf-pros::millis());
