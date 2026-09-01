@@ -84,9 +84,14 @@ public:
         std::vector<uint8_t> buf(fs), cz; std::vector<uint32_t> px(pc);
         if (Z) cz.reserve(mc);
         const uint8_t *yp=buf.data(), *up=yp+pc, *vp=up+cw*ch;
-        const int dw=std::min(w,480), dh=std::min(h,272);
-        const int dx=(480-dw)/2, dy=(272-dh)/2, sx=(w-dw)/2, sy=(h-dh)/2;
+        constexpr int SW = 480, SH = 272;
+        const int dw=std::min(w,SW), dh=std::min(h,SH);
+        const int dx=(SW-dw)/2, dy=(SH-dh)/2, sx=(w-dw)/2, sy=(h-dh)/2;
         uint32_t* const s = px.data() + (std::size_t)sy*w + sx;
+        std::vector<uint32_t> canvas;
+        if (dw != SW || dh != SH) {
+            canvas.assign((std::size_t)SW * SH, 0);
+        }
         uint32_t nf = pros::millis(), pa = 0; bool ok=true, stp=false;
         for (;;) {
             if (st_.load(std::memory_order_relaxed)) { stp=true; break; }
@@ -114,7 +119,18 @@ public:
                 }
             }
             if (CF==0) r2p(buf.data(),pc,px.data()); else y2p(yp,up,vp,w,h,px.data());
-            pros::screen::copy_area((int16_t)dx,(int16_t)dy,(int16_t)(dx+dw-1),(int16_t)(dy+dh-1),s,(int32_t)w);
+
+            if (dw == SW && dh == SH) {
+                pros::screen::copy_area(0, 0, (int16_t)(SW - 1), (int16_t)(SH - 1), px.data(), SW);
+            } else {
+                for (int row = 0; row < dh; ++row) {
+                    std::memcpy(canvas.data() + (std::size_t)(dy + row) * SW + dx,
+                                s + (std::size_t)row * w,
+                                (std::size_t)dw * sizeof(uint32_t));
+                }
+                pros::screen::copy_area(0, 0, (int16_t)(SW - 1), (int16_t)(SH - 1), canvas.data(), SW);
+            }
+
             pa+=1000; const uint32_t pd=pa/fr; pa%=fr; nf+=pd;
             const int32_t wt=(int32_t)(nf-pros::millis());
             if (wt>0) pros::delay((uint32_t)wt); else { nf=pros::millis(); pros::delay(1); }
