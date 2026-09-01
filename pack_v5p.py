@@ -48,7 +48,7 @@ def pack(inp,out,fmt,w,h,fps,z,ytdl_format="bestvideo/best"):
     src = resolve_source(inp, ytdl_format)
     m = magic(fmt,z)
     print(f"[*] {m.decode()} {fmt.upper()}{',LZ4' if z else ',raw'} {inp} -> {w}x{h}@{fps}")
-    cmd = ["ffmpeg","-y","-i",src,"-vf",f"scale={w}:{h}:force_original_aspect_ratio=decrease,pad={w}:{h}:(ow-iw)/2:(oh-ih)/2:black,fps={fps}","-pix_fmt","rgb24" if fmt=="rgb" else "yuv420p","-f","rawvideo","pipe:1"]
+    cmd = ["ffmpeg","-nostdin","-y","-i",src,"-vf",f"scale={w}:{h}:force_original_aspect_ratio=decrease,pad={w}:{h}:(ow-iw)/2:(oh-ih)/2:black,fps={fps}","-pix_fmt","rgb24" if fmt=="rgb" else "yuv420p","-f","rawvideo","pipe:1"]
     fs = fsize(fmt,w,h)
     t0=time.time(); n=0; rt=0; ct=0
     p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
@@ -72,7 +72,13 @@ def pack(inp,out,fmt,w,h,fps,z,ytdl_format="bestvideo/best"):
             sys.stdout.write(f"\r[*] Frame {n:5d} | {el:.1f}s | {cur_fps:.1f} fps | {ct/1e6:.2f}MB{c_info}   ")
             sys.stdout.flush()
         f.seek(12); f.write(struct.pack('<I',n))
-    p.wait()
+    if p.stdout:
+        p.stdout.close()
+    try:
+        p.wait(timeout=2)
+    except subprocess.TimeoutExpired:
+        p.kill()
+        p.wait()
     print()
     print(f"[+] {n} frames, {time.time()-t0:.1f}s, {os.path.getsize(out)/1e6:.2f}MB" + (f", {rt/ct:.2f}x ratio" if z and ct else ""))
 
