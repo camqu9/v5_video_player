@@ -13,5 +13,5 @@ High-performance video playback on the VEX V5 Robot Brain screen (480x272 @ up t
 - **Background Task Support**: Non-blocking playback within a PROS background task (`pros::Task`) with asynchronous stop support.
 
 ## Structure
-- `pack_yuv.py` / `v5p_player.py`: Python video encoder & desktop reference player.
+- `pack_v5p.py` / `v5p_player.py`: Python video encoder (supports local video files and online streams via `yt-dlp`) & desktop reference player.
 - `lz4 to rgb disp + main logic/`: PROS C++ project with `include/v5p.hpp` and robot integration in `src/main.cpp`.
