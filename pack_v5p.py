@@ -50,7 +50,15 @@ def pack(inp,out,fmt,w,h,fps,z,ytdl_format="bestvideo/best"):
             cur_fps = n / el if el > 0 else 0
             sys.stdout.write(f"\r[*] Frame {n:5d} | {el:.1f}s | {cur_fps:.1f} fps | {ct/1e6:.2f}MB{c_info}   ")
             sys.stdout.flush()
+
+        # Update frame count in header
         f.seek(12); f.write(struct.pack('<I',n))
+
+        # Explicit sync notification so USB drive writes don't look like hangs
+        sys.stdout.write(f"\r[*] Rendered {n} frames ({time.time()-t0:.1f}s). Flushing & syncing {ct/1e6:.2f}MB to disk...   ")
+        sys.stdout.flush()
+        f.flush()
+        os.fsync(f.fileno())
 
     if p.stdout:
         p.stdout.close()
