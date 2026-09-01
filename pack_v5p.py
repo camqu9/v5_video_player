@@ -59,12 +59,21 @@ def pack(inp,out,fmt,w,h,fps,z,ytdl_format="bestvideo/best"):
             if len(raw) < fs: break
             if z:
                 c = lz4.block.compress(raw, mode='default', store_size=False)
-                f.write(struct.pack('<I',len(c))); f.write(c); ct += len(c)
+                c_len = len(c)
+                f.write(struct.pack('<I',c_len)); f.write(c); ct += c_len
+                c_info = f" | {c_len/1024:.1f}KB ({fs/c_len:.2f}x) | avg {rt+fs:.0f}/{ct:.0f} ({(rt+fs)/ct:.2f}x)"
             else:
                 f.write(raw)
+                ct += fs
+                c_info = ""
             rt += fs; n += 1
+            el = time.time() - t0
+            cur_fps = n / el if el > 0 else 0
+            sys.stdout.write(f"\r[*] Frame {n:5d} | {el:.1f}s | {cur_fps:.1f} fps | {ct/1e6:.2f}MB{c_info}   ")
+            sys.stdout.flush()
         f.seek(12); f.write(struct.pack('<I',n))
     p.wait()
+    print()
     print(f"[+] {n} frames, {time.time()-t0:.1f}s, {os.path.getsize(out)/1e6:.2f}MB" + (f", {rt/ct:.2f}x ratio" if z and ct else ""))
 
 if __name__ == "__main__":
