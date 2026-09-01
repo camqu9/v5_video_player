@@ -5,53 +5,32 @@ import lz4.block
 def fsize(fmt,w,h): return w*h*3 if fmt=="rgb" else w*h+2*((w//2)*(h//2))
 def magic(fmt,z): return (b"V5RZ" if z else b"V5RU") if fmt=="rgb" else (b"V5YZ" if z else b"V5YU")
 
-def resolve_source(inp, ytdl_format="bestvideo/best"):
-    # If local file exists, use it directly
-    if os.path.exists(inp):
-        return inp
-
-    # Attempt resolution via yt-dlp for URLs or queries
-    print(f"[*] Resolving '{inp}' via yt-dlp...")
-    try:
-        import yt_dlp
-        ydl_opts = {
-            'format': ytdl_format,
-            'quiet': True,
-            'no_warnings': True,
-        }
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(inp, download=False)
-            if 'entries' in info:
-                info = info['entries'][0]
-            url = info.get('url')
-            title = info.get('title', inp)
-            if url:
-                print(f"[+] Found stream: {title}")
-                return url
-    except Exception:
-        pass
-
-    try:
-        res = subprocess.run(["yt-dlp", "-g", "-f", ytdl_format, inp],
-                             capture_output=True, text=True, check=True)
-        url = res.stdout.strip().split('\n')[0]
-        if url:
-            print(f"[+] Found stream via yt-dlp CLI")
-            return url
-    except Exception:
-        pass
-
-    return inp
+def is_remote(inp):
+    return inp.startswith(("http://", "https://", "www.", "ytdl:", "ytsearch:")) or not os.path.exists(inp)
 
 def pack(inp,out,fmt,w,h,fps,z,ytdl_format="bestvideo/best"):
     if fmt=="yuv" and (w%2 or h%2): sys.exit(f"[!] YUV420 needs even dims, got {w}x{h}")
-    src = resolve_source(inp, ytdl_format)
     m = magic(fmt,z)
     print(f"[*] {m.decode()} {fmt.upper()}{',LZ4' if z else ',raw'} {inp} -> {w}x{h}@{fps}")
-    cmd = ["ffmpeg","-nostdin","-y","-i",src,"-vf",f"scale={w}:{h}:force_original_aspect_ratio=decrease,pad={w}:{h}:(ow-iw)/2:(oh-ih)/2:black,fps={fps}","-pix_fmt","rgb24" if fmt=="rgb" else "yuv420p","-f","rawvideo","pipe:1"]
+
+    yt_p = None
+    if is_remote(inp):
+        print(f"[*] Streaming '{inp}' via yt-dlp pipe...")
+        yt_cmd = ["yt-dlp", "-o", "-", "-f", ytdl_format, "--no-warnings", inp]
+        yt_p = subprocess.Popen(yt_cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+        ffmpeg_input = "pipe:0"
+        ffmpeg_stdin = yt_p.stdout
+    else:
+        ffmpeg_input = inp
+        ffmpeg_stdin = subprocess.DEVNULL
+
+    cmd = ["ffmpeg","-nostdin","-y","-i",ffmpeg_input,"-vf",f"scale={w}:{h}:force_original_aspect_ratio=decrease,pad={w}:{h}:(ow-iw)/2:(oh-ih)/2:black,fps={fps}","-pix_fmt","rgb24" if fmt=="rgb" else "yuv420p","-f","rawvideo","pipe:1"]
     fs = fsize(fmt,w,h)
     t0=time.time(); n=0; rt=0; ct=0
-    p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+    p = subprocess.Popen(cmd, stdin=ffmpeg_stdin, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+    if yt_p and yt_p.stdout:
+        yt_p.stdout.close()
+
     with open(out,'wb') as f:
         f.write(m); f.write(struct.pack('<HHHHI',w,h,fps,0,0))
         while True:
@@ -72,13 +51,22 @@ def pack(inp,out,fmt,w,h,fps,z,ytdl_format="bestvideo/best"):
             sys.stdout.write(f"\r[*] Frame {n:5d} | {el:.1f}s | {cur_fps:.1f} fps | {ct/1e6:.2f}MB{c_info}   ")
             sys.stdout.flush()
         f.seek(12); f.write(struct.pack('<I',n))
+
     if p.stdout:
         p.stdout.close()
     try:
-        p.wait(timeout=2)
+        p.wait(timeout=3)
     except subprocess.TimeoutExpired:
         p.kill()
         p.wait()
+
+    if yt_p:
+        try:
+            yt_p.wait(timeout=2)
+        except subprocess.TimeoutExpired:
+            yt_p.kill()
+            yt_p.wait()
+
     print()
     print(f"[+] {n} frames, {time.time()-t0:.1f}s, {os.path.getsize(out)/1e6:.2f}MB" + (f", {rt/ct:.2f}x ratio" if z and ct else ""))
 
