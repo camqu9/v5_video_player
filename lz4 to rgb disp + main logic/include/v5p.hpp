@@ -9,6 +9,10 @@
 #include <vector>
 #include <algorithm>
 #include <atomic>
+extern "C" {
+    void vexDisplayCopyRect(int32_t x1, int32_t y1, int32_t x2, int32_t y2, uint32_t *pSrc, int32_t srcStride);
+}
+
 class V5P {
 public:
     void stop() { st_.store(true, std::memory_order_relaxed); }
@@ -121,14 +125,14 @@ public:
             if (CF==0) r2p(buf.data(),pc,px.data()); else y2p(yp,up,vp,w,h,px.data());
 
             if (dw == SW && dh == SH) {
-                pros::screen::copy_area(0, 0, (int16_t)(SW - 1), (int16_t)(SH - 1), px.data(), SW);
+                vexDisplayCopyRect(0, 0, SW, SH, px.data(), SW);
             } else {
                 for (int row = 0; row < dh; ++row) {
                     std::memcpy(canvas.data() + (std::size_t)(dy + row) * SW + dx,
                                 s + (std::size_t)row * w,
                                 (std::size_t)dw * sizeof(uint32_t));
                 }
-                pros::screen::copy_area(0, 0, (int16_t)(SW - 1), (int16_t)(SH - 1), canvas.data(), SW);
+                vexDisplayCopyRect(0, 0, SW, SH, canvas.data(), SW);
             }
 
             pa+=1000; const uint32_t pd=pa/fr; pa%=fr; nf+=pd;
