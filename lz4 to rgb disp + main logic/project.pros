@@ -594,8 +594,8 @@
     "upload_options": {
       "icon": "robot",
       "description": "paws.nya.je paws.nya.pub",
-      "after": "none",
-      "slot": 1
+      "after": "run",
+      "slot": 2
     },
     "use_early_access": false
   }

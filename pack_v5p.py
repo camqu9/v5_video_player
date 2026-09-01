@@ -85,7 +85,7 @@ if __name__ == "__main__":
     a.add_argument("--format", choices=["rgb","yuv"], default="yuv", help="Pixel format (default: yuv)")
     a.add_argument("--no-compress", action="store_true", help="Disable LZ4 compression")
     a.add_argument("--width", type=int, default=480, help="Output width (default: 480)")
-    a.add_argument("--height", type=int, default=272, help="Output height (default: 272)")
+    a.add_argument("--height", type=int, default=240, help="Output height (default: 240)")
     a.add_argument("--fps", type=int, default=60, help="Output framerate (default: 60)")
     a.add_argument("--ytdl-format", default="bestvideo/best", help="yt-dlp format selector (default: bestvideo/best)")
     r = a.parse_args()

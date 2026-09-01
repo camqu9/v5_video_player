@@ -1,6 +1,6 @@
 # V5 Video Player (LZ4 Streaming Player for VEX V5)
 
-High-performance video playback on the VEX V5 Robot Brain screen (480x272 @ up to 60 FPS) with direct hardware blitting (`pros::screen::copy_area`) and ultra-fast LZ4 streaming decompression from MicroSD (`/usd/`).
+High-performance video playback on the VEX V5 Robot Brain screen (480x240 @ up to 60 FPS) with direct hardware blitting (`pros::screen::copy_area`) and ultra-fast LZ4 streaming decompression from MicroSD (`/usd/`).
 
 ## Proof of Concept
 
