@@ -20,3 +20,12 @@ bin/
 compile_commands.json
 temp.log
 temp.errors
+
+# Python & editor swap/backup files
+__pycache__/
+*.pyc
+*.bak
+*.kate-swp
+.*.kate-swp
+*.swp
+

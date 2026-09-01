@@ -66,8 +66,8 @@ while (true){
 	auto &t = girlcat.object.tag;
 int girlcat_x = (t.x0 + t.x1 + t.x2 + t.x3) / 4;
 int go_towards_gay_furrys = (girlcat_x - 160) / 2;
-furry_1.move(std::clamp(60 + go_towards_gay_furrys, -127, 127));
-furry_2.move(std::clamp(60 - go_towards_gay_furrys, -127, 127));
+furry_1.move(std::clamp(60 + -go_towards_gay_furrys, -127, 127));
+furry_2.move(std::clamp(60 - -go_towards_gay_furrys, -127, 127));
 meow = true;
 break; 
 
@@ -96,10 +96,10 @@ break;
 void opcontrol() {
 	catgirl_datecter.reset();
 	 while (true) {
-    int girlcat = master.get_analog(pros::E_CONTROLLER_ANALOG_RIGHT_X);
+    int girlcat = -master.get_analog(pros::E_CONTROLLER_ANALOG_RIGHT_X);
     int spiner_cat = master.get_analog(pros::E_CONTROLLER_ANALOG_RIGHT_Y);
 	 furry_1.move(girlcat + spiner_cat);
-	 furry_2.move(girlcat - spiner_cat); // mrreoawwww :pleading: mrroewawww mrroewawwddd girlcat REIDING THIS IM A CATGIRL mrreowww 
+	 furry_2.move(girlcat - spiner_cat); // mrreoawwww :pleading: mrroewawww mrroewawwddd girlcat REIDING THIS IM A CATGIRL mrreowww
       pros::delay(20);
 	 }
 }
