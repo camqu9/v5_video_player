@@ -12,7 +12,7 @@
 extern "C" {
     void vexDisplayCopyRect(int32_t x1, int32_t y1, int32_t x2, int32_t y2, uint32_t *pSrc, int32_t srcStride);
     void vexDisplayClipRegionSet(int32_t x1, int32_t y1, int32_t x2, int32_t y2);
-    void vexDisplayClipRegionSetWithIndex(int32_t index, int32_t x1, int32_t y1, int32_t x2, int32_t y2);
+    void vexDisplayClipRegionClear(void);
     void vexDisplayRender(bool bVsyncWait, bool bRunScheduler);
 }
 
@@ -100,9 +100,9 @@ public:
             canvas.assign((std::size_t)SW * SH, 0);
         }
 
-        // Set clipping region to full unconstrained 480x272
+        // Clear any PROS/LVGL clip region and set to full unconstrained 480x272
+        vexDisplayClipRegionClear();
         vexDisplayClipRegionSet(0, 0, SW - 1, SH - 1);
-        vexDisplayClipRegionSetWithIndex(0, 0, 0, SW - 1, SH - 1);
 
         uint32_t nf = pros::millis(), pa = 0; bool ok=true, stp=false;
         for (;;) {
