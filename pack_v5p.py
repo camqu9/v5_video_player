@@ -8,7 +8,7 @@ def magic(fmt,z): return (b"V5RZ" if z else b"V5RU") if fmt=="rgb" else (b"V5YZ"
 def is_remote(inp):
     return inp.startswith(("http://", "https://", "www.", "ytdl:", "ytsearch:")) or not os.path.exists(inp)
 
-def pack(inp,out,fmt,w,h,fps,z,lossy=False,lossy_mask=248,lz4_level=9,ytdl_format="bestvideo/best"):
+def pack(inp,out,fmt,w,h,fps,z,lossy=False,lossy_mask=248,lz4_level=12,ytdl_format="bestvideo/best"):
     if fmt=="yuv" and (w%2 or h%2): sys.exit(f"[!] YUV420 needs even dims, got {w}x{h}")
     m = magic(fmt,z)
     print(f"[*] {m.decode()} {fmt.upper()}{',LZ4' if z else ',raw'} {inp} -> {w}x{h}@{fps}")
@@ -90,7 +90,7 @@ if __name__ == "__main__":
     a.add_argument("--no-compress", action="store_true", help="Disable LZ4 compression")
     a.add_argument("--lossy", action="store_true", help="Enable lossy quantization and denoising for extreme compression")
     a.add_argument("--lossy-mask", type=int, default=248, help="Bitmask for lossy quantization (default: 248). Use 240 for extreme compression (drops 4 bits) or 252 for higher quality (drops 2 bits).")
-    a.add_argument("--lz4-level", type=int, default=9, help="LZ4 high compression level (0 for default, 1-12 for HC mode, default: 9)")
+    a.add_argument("--lz4-level", type=int, default=12, help="LZ4 high compression level (0 for default, 1-12 for HC mode, default: 12)")
     a.add_argument("--width", type=int, default=480, help="Output width (default: 480)")
     a.add_argument("--height", type=int, default=240, help="Output height (default: 240)")
     a.add_argument("--fps", type=int, default=60, help="Output framerate (default: 60)")
