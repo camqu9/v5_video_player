@@ -152,6 +152,10 @@ def main():
         compressed = hdr["compressed"]
         writer = None
         decoded_count = 0
+        
+        import time
+        frame_duration = 1.0 / (hdr["fps"] or 30)
+        next_frame_time = time.time() + frame_duration
 
         for i, raw in enumerate(read_frames(f, w, h, compressed=compressed, fmt=fmt)):
             if args.frame is not None and i != args.frame:
@@ -177,9 +181,14 @@ def main():
 
             if args.play:
                 cv2.imshow("v5p playback", bgr)
-                delay_ms = max(1, int(1000 / (hdr["fps"] or 30)))
+                
+                now = time.time()
+                sleep_time = next_frame_time - now
+                delay_ms = max(1, int(sleep_time * 1000)) if sleep_time > 0 else 1
+                
                 if cv2.waitKey(delay_ms) & 0xFF == ord('q'):
                     break
+                next_frame_time += frame_duration
 
             if args.out:
                 if writer is None:
