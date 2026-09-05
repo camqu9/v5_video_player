@@ -6,8 +6,9 @@
 #include "pros/rtos.hpp"
 #include "v5p.hpp"
 #include "lemlib/api.hpp"
-#include "pros/ai_vision.hpp"
+#include "pros/ai_vision.h"
 #include <algorithm>
+#include <chrono>
 V5P furry;
 pros::Controller master (pros::E_CONTROLLER_MASTER);
 pros::MotorGroup furry_1 ({11,12});
@@ -30,7 +31,7 @@ void on_center_button() {
  */
 void initialize() {
 pros::Task funnythingvideo([]{
-  furry.video("/usd/tbaka.v5p");
+  furry.video("/usd/looping_the_rooms.v5p");
 });
 }
 void disabled() {}
@@ -58,7 +59,9 @@ void competition_initialize() {}
  * from where it left off.
  */
 void autonomous() {
-while (true){
+	catgirl_datecter.enable_detection_types(pros::AivisionModeType::tags);
+	while (true) {
+	
 	bool meow = false;
  for (auto &girlcat : catgirl_datecter.get_all_objects()){
 	if (!pros::AIVision::is_type(girlcat, pros::AivisionDetectType::tag)) continue;
@@ -66,8 +69,8 @@ while (true){
 	auto &t = girlcat.object.tag;
 int girlcat_x = (t.x0 + t.x1 + t.x2 + t.x3) / 4;
 int go_towards_gay_furrys = (girlcat_x - 160) / 2;
-furry_1.move(std::clamp(60 + -go_towards_gay_furrys, -127, 127));
-furry_2.move(std::clamp(60 - -go_towards_gay_furrys, -127, 127));
+furry_1.move(-std::clamp(60 - go_towards_gay_furrys, -127, 127));
+furry_2.move(std::clamp(60 - go_towards_gay_furrys, -127, 127));
 meow = true;
 break; 
 
@@ -96,13 +99,11 @@ break;
 void opcontrol() {
 	catgirl_datecter.reset();
 	 while (true) {
-    int girlcat = -master.get_analog(pros::E_CONTROLLER_ANALOG_RIGHT_X);
+    int girlcat = master.get_analog(pros::E_CONTROLLER_ANALOG_RIGHT_X);
     int spiner_cat = master.get_analog(pros::E_CONTROLLER_ANALOG_RIGHT_Y) * 2;
-    furry_1.move(girlcat + spiner_cat);
-    furry_2.move(girlcat -
-                 spiner_cat); // mrreoawwww :pleading: mrroewawww mrroewawwddd
+    furry_1.move(-girlcat + spiner_cat);
+    furry_2.move(-girlcat - spiner_cat); // mrreoawwww :pleading: mrroewawww mrroewawwddd
                               // girlcat REIDING THIS IM A CATGIRL mrreowww
     pros::delay(20);
 	 }
 }
-	
