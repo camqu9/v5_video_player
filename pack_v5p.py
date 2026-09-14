@@ -1,6 +1,37 @@
 #!/usr/bin/env python3
 import argparse, subprocess, struct, sys, os, time
-import lz4.block
+try:
+    import lz4.block
+except ImportError:
+    import ctypes, ctypes.util
+    _lz4_name = ctypes.util.find_library("lz4") or "liblz4.so" or "liblz4.so.1"
+    _liblz4 = ctypes.CDLL(_lz4_name)
+    _liblz4.LZ4_compressBound.argtypes = [ctypes.c_int]
+    _liblz4.LZ4_compressBound.restype = ctypes.c_int
+    _liblz4.LZ4_compress_default.argtypes = [ctypes.c_char_p, ctypes.c_char_p, ctypes.c_int, ctypes.c_int]
+    _liblz4.LZ4_compress_default.restype = ctypes.c_int
+    _liblz4.LZ4_compress_HC.argtypes = [ctypes.c_char_p, ctypes.c_char_p, ctypes.c_int, ctypes.c_int, ctypes.c_int]
+    _liblz4.LZ4_compress_HC.restype = ctypes.c_int
+
+    class _LZ4Block:
+        @staticmethod
+        def compress(data, mode='default', compression=0, store_size=False):
+            src_len = len(data)
+            bound = _liblz4.LZ4_compressBound(src_len)
+            buf = ctypes.create_string_buffer(bound)
+            if mode == 'high_compression':
+                comp_len = _liblz4.LZ4_compress_HC(data, buf, src_len, bound, compression if compression > 0 else 9)
+            else:
+                comp_len = _liblz4.LZ4_compress_default(data, buf, src_len, bound)
+            if comp_len <= 0:
+                raise RuntimeError("LZ4 compression failed")
+            return buf.raw[:comp_len]
+
+    class _LZ4Module:
+        block = _LZ4Block()
+
+    lz4 = _LZ4Module()
+
 
 def fsize(fmt,w,h): return w*h*3 if fmt=="rgb" else w*h+2*((w//2)*(h//2))
 def magic(fmt,z): return (b"V5RZ" if z else b"V5RU") if fmt=="rgb" else (b"V5YZ" if z else b"V5YU")

@@ -29,3 +29,7 @@ __pycache__/
 .*.kate-swp
 *.swp
 
+
+# clangd and compiler flags
+.clangd
+compile_flags.txt

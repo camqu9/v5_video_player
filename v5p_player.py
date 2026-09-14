@@ -25,7 +25,29 @@ import struct
 import sys
 
 import numpy as np
-import lz4.block
+try:
+    import lz4.block
+except ImportError:
+    import ctypes, ctypes.util
+    _lz4_name = ctypes.util.find_library("lz4") or "liblz4.so" or "liblz4.so.1"
+    _liblz4 = ctypes.CDLL(_lz4_name)
+    _liblz4.LZ4_decompress_safe.argtypes = [ctypes.c_char_p, ctypes.c_char_p, ctypes.c_int, ctypes.c_int]
+    _liblz4.LZ4_decompress_safe.restype = ctypes.c_int
+
+    class _LZ4Block:
+        @staticmethod
+        def decompress(source, uncompressed_size):
+            buf = ctypes.create_string_buffer(uncompressed_size)
+            decomp_len = _liblz4.LZ4_decompress_safe(source, buf, len(source), uncompressed_size)
+            if decomp_len < 0:
+                raise RuntimeError("LZ4 decompression failed")
+            return buf.raw[:decomp_len]
+
+    class _LZ4Module:
+        block = _LZ4Block()
+
+    lz4 = _LZ4Module()
+
 
 try:
     import cv2
