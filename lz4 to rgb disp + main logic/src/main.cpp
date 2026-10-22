@@ -12,7 +12,6 @@
 #include <chrono>
 #include "pros/adi.hpp"
 #include "pros/optical.hpp"
-#include <dirent.h>
 #include <cstdio>
 #include <cctype>
 #include <string>
@@ -41,16 +40,25 @@ static const char* POS_FILE = "/usd/loop_pos.txt";
 
 static std::vector<std::string> scan_videos() {
 	std::vector<std::string> v;
-	DIR* d = opendir("/usd");
-	if (!d) return v;
-	while (dirent* e = readdir(d)) {
-		std::string n = e->d_name;
-		if (n.size() < 5) continue;
-		std::string ext = n.substr(n.size() - 4);
-		for (auto& c : ext) c = std::tolower(c);
-		if (ext == ".v5p") v.push_back(n);
+	static char buf[4096];
+	const char* paths[] = {"/", "/usd"};   // PROS docs are unclear which one it wants, so try both
+	for (const char* p : paths) {
+		buf[0] = '\0';
+		pros::usd::list_files(p, buf, sizeof(buf));
+		std::string all(buf), cur;
+		all += '\n';
+		for (char ch : all) {
+			if (ch == '\n' || ch == '\r') {
+				if (cur.size() >= 5) {
+					std::string ext = cur.substr(cur.size() - 4);
+					for (auto& c : ext) c = std::tolower(c);
+					if (ext == ".v5p") v.push_back(cur);
+				}
+				cur.clear();
+			} else cur += ch;
+		}
+		if (!v.empty()) break;
 	}
-	closedir(d);
 	std::sort(v.begin(), v.end());
 	return v;
 }
