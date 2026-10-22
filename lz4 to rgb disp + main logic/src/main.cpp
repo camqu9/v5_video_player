@@ -13,6 +13,7 @@
 #include "pros/adi.hpp"
 #include "pros/optical.hpp"
 V5P furry;
+pros::adi::DigitalIn STOP_FUCKING_STRIPING_NOW('b');
 pros::Controller master (pros::E_CONTROLLER_MASTER);
 pros::MotorGroup furry_1 ({11,12});
 pros::MotorGroup furry_2 ({-9,-10});
@@ -123,6 +124,7 @@ void opcontrol() {
 	while (true) {
 		int dr4b_up = master.get_digital(pros::E_CONTROLLER_DIGITAL_L1);
 		int dr4b_down = master.get_digital(pros::E_CONTROLLER_DIGITAL_L2);
+		if (STOP_FUCKING_STRIPING_NOW.get_value() == 1) { dr4b_down = 0; }
 		int girlcat = master.get_analog(pros::E_CONTROLLER_ANALOG_RIGHT_X);
 		int spiner_cat = master.get_analog(pros::E_CONTROLLER_ANALOG_LEFT_Y) * 2;
 		int air_go = master.get_digital_new_press(pros::E_CONTROLLER_DIGITAL_R1);
@@ -150,7 +152,6 @@ void opcontrol() {
 			);
 			}
 		}
-
 		pros::delay(20);
 	}
 }
