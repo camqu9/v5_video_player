@@ -12,6 +12,11 @@
 #include <chrono>
 #include "pros/adi.hpp"
 #include "pros/optical.hpp"
+#include <dirent.h>
+#include <cstdio>
+#include <cctype>
+#include <string>
+#include <vector>
 V5P furry;
 pros::adi::DigitalIn STOP_FUCKING_STRIPING_NOW('b');
 pros::Controller master (pros::E_CONTROLLER_MASTER);
@@ -30,6 +35,64 @@ lemlib::TrackingWheel left_tracking_wheel(&furry_1, lemlib::Omniwheel::NEW_325, 
 lemlib::TrackingWheel right_tracking_wheel(&furry_2, lemlib::Omniwheel::NEW_325, 6.25, 200);
 lemlib::OdomSensors purrspeed(&left_tracking_wheel,&right_tracking_wheel,nullptr,nullptr,&imu );
 lemlib::Chassis chassis(furtrain, linearController, angularController, purrspeed);
+
+// ---- video playlist: plays every .v5p in the SD root on loop, resumes from loop_pos.txt ----
+static const char* POS_FILE = "/usd/loop_pos.txt";
+
+static std::vector<std::string> scan_videos() {
+	std::vector<std::string> v;
+	DIR* d = opendir("/usd");
+	if (!d) return v;
+	while (dirent* e = readdir(d)) {
+		std::string n = e->d_name;
+		if (n.size() < 5) continue;
+		std::string ext = n.substr(n.size() - 4);
+		for (auto& c : ext) c = std::tolower(c);
+		if (ext == ".v5p") v.push_back(n);
+	}
+	closedir(d);
+	std::sort(v.begin(), v.end());
+	return v;
+}
+
+static void video_loop() {
+	static bool started = false;      // so initialize() + competition_initialize() don't both start it
+	if (started) return;
+	started = true;
+
+	uint32_t t0 = pros::millis();
+	while (!pros::usd::is_installed()) {
+		if (pros::millis() - t0 > 10000) return;
+		pros::delay(200);
+	}
+
+	auto vids = scan_videos();
+	if (vids.empty()) return;
+
+	int idx = 0;
+	if (FILE* f = fopen(POS_FILE, "r")) {
+		if (fscanf(f, "%d", &idx) != 1) idx = 0;
+		fclose(f);
+	}
+	if (idx < 0) idx = 0;
+	idx %= (int)vids.size();
+
+	int fails = 0;
+	while (fails < (int)vids.size()) {
+		int next = (idx + 1) % (int)vids.size();
+		if (FILE* f = fopen(POS_FILE, "w")) {
+			fprintf(f, "%d\n", next);
+			fclose(f);
+		}
+		std::string path = "/usd/" + vids[idx];
+		bool ok = furry.video(path.c_str(), false);
+		fails = ok ? 0 : fails + 1;
+		idx = next;
+		pros::delay(50);
+	}
+}
+// ------------------------------------------------------------------------------------------
+
 /**
  * A callback function for LLEMU's center button.
  *
@@ -47,7 +110,7 @@ void on_center_button() {
  */
 void initialize() {
 pros::Task funnythingvideo([]{
-  furry.video("/usd/drhouse.v5p");
+  video_loop();
 });
 }
 void disabled() {}
@@ -63,7 +126,7 @@ void disabled() {}
  */
 void competition_initialize() {
 pros::Task funnythingvideo([]{
-  furry.video("/usd/drhouse.v5p");
+  video_loop();
 });
 }
 /**
